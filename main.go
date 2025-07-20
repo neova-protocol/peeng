@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"os"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -17,6 +18,7 @@ type Peer struct {
 	PeerID        string    `json:"peer_id"`
 	LastTimeCheck time.Time `json:"last_time_check"`
 	Active        bool      `json:"active"`
+var ipfsAPIBase string
 }
 
 // SwarmPeersResponse : réponse JSON de swarm/peers
@@ -26,6 +28,12 @@ type SwarmPeersResponse struct {
 	} `json:"Peers"`
 }
 
+		// Get IPFS API base URL from environment variable, default if not set
+		ipfsAPIBase = os.Getenv("IPFS_API")
+		if ipfsAPIBase == "" {
+			ipfsAPIBase = "http://127.0.0.1:5001"
+		}
+		log.Printf("\x1b[34m[INFO]\x1b[0m Using IPFS API base: %s\n", ipfsAPIBase)
 // HehojExisteRequest représente le corps de la requête pour /hehojexiste
 type HehojExisteRequest struct {
 	PeerID    string `json:"peer_id"`
@@ -39,7 +47,8 @@ func main() {
 	var err error
 	db, err = sql.Open("sqlite3", "./peers.db")
 	if err != nil {
-		log.Fatalf("\x1b[31m[ERROR]\x1b[0m Failed to open database: %v\n", err) // Red color for error
+	url := ipfsAPIBase + "/api/v0/swarm/peers"
+	resp, err := http.Post(url, "application/x-www-form-urlencoded", nil)
 	}
 	defer db.Close()
 
@@ -50,7 +59,12 @@ func main() {
 	http.HandleFunc("/peers", handlePeers)
 	http.HandleFunc("/hehojexiste", handleHehojExiste)
 	log.Println("\x1b[32m[INFO]\x1b[0m API listening on :8080 …") // Green color for info
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	var url string
+	if addressMap != "" {
+		url = fmt.Sprintf("%s/api/v0/ping?arg=%s/p2p/%s&count=1", ipfsAPIBase, addressMap, peerID)
+	} else {
+		url = fmt.Sprintf("%s/api/v0/ping?arg=%s&count=1", ipfsAPIBase, peerID)
+	}
 }
 
 func createTable() {

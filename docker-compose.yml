@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  peeng:
+    build: .
+    container_name: peeng
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./peers.db:/app/peers.db
+    environment:
+      - IPFS_API=http://host.docker.internal:5001
+    restart: unless-stopped
