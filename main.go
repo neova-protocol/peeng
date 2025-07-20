@@ -15,25 +15,19 @@ import (
 
 // Peer représente une entrée dans la DB
 type Peer struct {
-	PeerID        string    `json:"peer_id"`
-	LastTimeCheck time.Time `json:"last_time_check"`
-	Active        bool      `json:"active"`
-var ipfsAPIBase string
+	   PeerID        string    `json:"peer_id"`
+	   LastTimeCheck time.Time `json:"last_time_check"`
+	   Active        bool      `json:"active"`
 }
+
+var ipfsAPIBase string
 
 // SwarmPeersResponse : réponse JSON de swarm/peers
 type SwarmPeersResponse struct {
-	Peers []struct {
-		Peer string `json:"Peer"`
-	} `json:"Peers"`
+	   Peers []struct {
+			   Peer string `json:"Peer"`
+	   } `json:"Peers"`
 }
-
-		// Get IPFS API base URL from environment variable, default if not set
-		ipfsAPIBase = os.Getenv("IPFS_API")
-		if ipfsAPIBase == "" {
-			ipfsAPIBase = "http://127.0.0.1:5001"
-		}
-		log.Printf("\x1b[34m[INFO]\x1b[0m Using IPFS API base: %s\n", ipfsAPIBase)
 // HehojExisteRequest représente le corps de la requête pour /hehojexiste
 type HehojExisteRequest struct {
 	PeerID    string `json:"peer_id"`
@@ -44,27 +38,28 @@ var db *sql.DB
 var dbMu sync.Mutex // Mutex for database operations to prevent "database is locked" errors
 
 func main() {
-	var err error
-	db, err = sql.Open("sqlite3", "./peers.db")
-	if err != nil {
-	url := ipfsAPIBase + "/api/v0/swarm/peers"
-	resp, err := http.Post(url, "application/x-www-form-urlencoded", nil)
-	}
-	defer db.Close()
+	   var err error
+	   db, err = sql.Open("sqlite3", "./peers.db")
+	   if err != nil {
+			   log.Fatalf("\x1b[31m[ERROR]\x1b[0m Failed to open database: %v\n", err) // Red color for error
+	   }
+	   defer db.Close()
 
-	createTable()
+	   // Get IPFS API base URL from environment variable, default if not set
+	   ipfsAPIBase = os.Getenv("IPFS_API")
+	   if ipfsAPIBase == "" {
+			   ipfsAPIBase = "http://127.0.0.1:5001"
+	   }
+	   log.Printf("\x1b[34m[INFO]\x1b[0m Using IPFS API base: %s\n", ipfsAPIBase)
 
-	go workerLoop()
+	   createTable()
 
-	http.HandleFunc("/peers", handlePeers)
-	http.HandleFunc("/hehojexiste", handleHehojExiste)
-	log.Println("\x1b[32m[INFO]\x1b[0m API listening on :8080 …") // Green color for info
-	var url string
-	if addressMap != "" {
-		url = fmt.Sprintf("%s/api/v0/ping?arg=%s/p2p/%s&count=1", ipfsAPIBase, addressMap, peerID)
-	} else {
-		url = fmt.Sprintf("%s/api/v0/ping?arg=%s&count=1", ipfsAPIBase, peerID)
-	}
+	   go workerLoop()
+
+	   http.HandleFunc("/peers", handlePeers)
+	   http.HandleFunc("/hehojexiste", handleHehojExiste)
+	   log.Println("\x1b[32m[INFO]\x1b[0m API listening on :8080 …") // Green color for info
+	   log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func createTable() {
@@ -128,28 +123,29 @@ func workerLoop() {
 }
 
 func fetchSwarmPeers() []string {
-	log.Println("\x1b[34m[INFO]\x1b[0m Fetching swarm peers from IPFS API.") // Blue color for info
-	resp, err := http.Post("http://127.0.0.1:5001/api/v0/swarm/peers", "application/x-www-form-urlencoded", nil)
+	   log.Println("\x1b[34m[INFO]\x1b[0m Fetching swarm peers from IPFS API.") // Blue color for info
+	   url := ipfsAPIBase + "/api/v0/swarm/peers"
+	   resp, err := http.Post(url, "application/x-www-form-urlencoded", nil)
 
-	if err != nil {
-		log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to get swarm peers: %v\n", err) // Red color for error
-		return nil
-	}
-	defer resp.Body.Close()
+	   if err != nil {
+			   log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to get swarm peers: %v\n", err) // Red color for error
+			   return nil
+	   }
+	   defer resp.Body.Close()
 
-	var result SwarmPeersResponse
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to decode swarm response: %v\n", err) // Red color for error
-		return nil
-	}
+	   var result SwarmPeersResponse
+	   err = json.NewDecoder(resp.Body).Decode(&result)
+	   if err != nil {
+			   log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to decode swarm response: %v\n", err) // Red color for error
+			   return nil
+	   }
 
-	var peers []string
-	for _, p := range result.Peers {
-		peers = append(peers, p.Peer)
-	}
-	log.Printf("\x1b[34m[INFO]\x1b[0m Found %d swarm peers.\n", len(peers)) // Blue color for info
-	return peers
+	   var peers []string
+	   for _, p := range result.Peers {
+			   peers = append(peers, p.Peer)
+	   }
+	   log.Printf("\x1b[34m[INFO]\x1b[0m Found %d swarm peers.\n", len(peers)) // Blue color for info
+	   return peers
 }
 
 func pingPeer(peerID string) bool {
@@ -157,27 +153,29 @@ func pingPeer(peerID string) bool {
 }
 
 func pingPeerWithAddress(peerID, addressMap string) bool {
-	log.Printf("\x1b[35m[PING]\x1b[0m Attempting to ping: %s (Address: %s)\n", peerID, addressMap) // Magenta color for ping
+	   log.Printf("\x1b[35m[PING]\x1b[0m Attempting to ping: %s (Address: %s)\n", peerID, addressMap) // Magenta color for ping
 
-	url := "http://127.0.0.1:5001/api/v0/ping?arg=" + peerID + "&count=1"
-	if addressMap != "" {
-		url = fmt.Sprintf("http://127.0.0.1:5001/api/v0/ping?arg=%s/p2p/%s&count=1", addressMap, peerID)
-	}
+	   var url string
+	   if addressMap != "" {
+			   url = fmt.Sprintf("%s/api/v0/ping?arg=%s/p2p/%s&count=1", ipfsAPIBase, addressMap, peerID)
+	   } else {
+			   url = fmt.Sprintf("%s/api/v0/ping?arg=%s&count=1", ipfsAPIBase, peerID)
+	   }
 
-	resp, err := http.Post(url, "application/x-www-form-urlencoded", nil)
+	   resp, err := http.Post(url, "application/x-www-form-urlencoded", nil)
 
-	if err != nil {
-		log.Printf("\x1b[31m[ERROR]\x1b[0m Ping %s failed: %v\n", peerID, err) // Red color for error
-		return false
-	}
-	defer resp.Body.Close()
+	   if err != nil {
+			   log.Printf("\x1b[31m[ERROR]\x1b[0m Ping %s failed: %v\n", peerID, err) // Red color for error
+			   return false
+	   }
+	   defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("\x1b[31m[ERROR]\x1b[0m Ping %s returned status code %d\n", peerID, resp.StatusCode) // Red color for error
-		return false
-	}
-	log.Printf("\x1b[32m[PING]\x1b[0m Successfully pinged %s.\n", peerID) // Green color for success
-	return true
+	   if resp.StatusCode != http.StatusOK {
+			   log.Printf("\x1b[31m[ERROR]\x1b[0m Ping %s returned status code %d\n", peerID, resp.StatusCode) // Red color for error
+			   return false
+	   }
+	   log.Printf("\x1b[32m[PING]\x1b[0m Successfully pinged %s.\n", peerID) // Green color for success
+	   return true
 }
 
 func upsertPeer(peerID string, checkTime time.Time, active bool) {
