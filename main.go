@@ -106,10 +106,10 @@ func workerLoop() {
 			ok := pingPeer(pid) // This calls pingPeerWithAddress
 			log.Printf("\x1b[33m[WORKER]\x1b[0m Pinged %s, result: %t\n", pid, ok) // Yellow color for worker
 			upsertPeer(pid, time.Now(), ok) // This will acquire its own lock
-			time.Sleep(2 * time.Second)     // Add 2-second delay between pings
+			time.Sleep(500 * time.Millisecond) // Add 500-millisecond delay between pings
 		}
 
-		time.Sleep(30 * time.Second)
+		time.Sleep(4 * time.Second)
 	}
 }
 
