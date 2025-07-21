@@ -49,6 +49,7 @@ func main() {
 
 	http.HandleFunc("/peers", handlePeers)
 	http.HandleFunc("/hehojexiste", handleHehojExiste)
+	http.HandleFunc("/", handleHealth)
 	log.Println("\x1b[32m[INFO]\x1b[0m API listening on :8080 …") // Green color for info
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
@@ -81,7 +82,11 @@ func workerLoop() {
 
 		// Ping all known peers and update their status
 		dbMu.Lock() // Acquire lock before querying
-		rows, err := db.Query("SELECT peer_id FROM peers")
+		rows, err := db.Query(`
+			SELECT peer_id FROM peers
+			ORDER BY last_time_check ASC
+			LIMIT 500
+		`)
 		if err != nil {
 			log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to query peers for ping: %v\n", err) // Red color for error
 			dbMu.Unlock() // Release lock on error
@@ -109,7 +114,7 @@ func workerLoop() {
 			time.Sleep(500 * time.Millisecond) // Add 500-millisecond delay between pings
 		}
 
-		time.Sleep(4 * time.Second)
+		time.Sleep(10 * time.Second)
 	}
 }
 
@@ -254,4 +259,10 @@ func handleHehojExiste(w http.ResponseWriter, r *http.Request) {
 		log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to encode /hehojexiste response: %v\n", err) // Red color for error
 	}
 	log.Printf("\x1b[32m[API]\x1b[0m /hehojexiste endpoint served for PeerID %s.\n", req.PeerID) // Green color for API
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK - version 1.0.1"))
+	log.Println("\x1b[32m[API]\x1b[0m / endpoint served.") // Green color for API
 }
