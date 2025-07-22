@@ -1,15 +1,16 @@
 package main
 
 import (
-	"database/sql"
-	"encoding/json"
-	"fmt"
-	"log"
-	"net/http"
-	"sync"
-	"time"
+	   "database/sql"
+	   "encoding/json"
+	   "fmt"
+	   "log"
+	   "net/http"
+	   "os"
+	   "sync"
+	   "time"
 
-	_ "github.com/mattn/go-sqlite3"
+	   _ "github.com/mattn/go-sqlite3"
 )
 
 // Peer représente une entrée dans la DB
@@ -32,26 +33,34 @@ type HehojExisteRequest struct {
 	AddressMap string `json:"address_map"`
 }
 
+
 var db *sql.DB
 var dbMu sync.Mutex // Mutex for database operations to prevent "database is locked" errors
 
+var ipfsAPI string
+
 func main() {
-	var err error
-	db, err = sql.Open("sqlite3", "./peers.db")
-	if err != nil {
-		log.Fatalf("\x1b[31m[ERROR]\x1b[0m Failed to open database: %v\n", err) // Red color for error
-	}
-	defer db.Close()
+	   var err error
+	   db, err = sql.Open("sqlite3", "./peers.db")
+	   if err != nil {
+			   log.Fatalf("\x1b[31m[ERROR]\x1b[0m Failed to open database: %v\n", err) // Red color for error
+	   }
+	   defer db.Close()
 
-	createTable()
+	   ipfsAPI = os.Getenv("IPFS_API")
+	   if ipfsAPI == "" {
+			   ipfsAPI = "http://127.0.0.1:5001" // Default fallback
+	   }
 
-	go workerLoop()
+	   createTable()
 
-	http.HandleFunc("/peers", handlePeers)
-	http.HandleFunc("/hehojexiste", handleHehojExiste)
-	http.HandleFunc("/", handleHealth)
-	log.Println("\x1b[32m[INFO]\x1b[0m API listening on :8080 …") // Green color for info
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	   go workerLoop()
+
+	   http.HandleFunc("/peers", handlePeers)
+	   http.HandleFunc("/hehojexiste", handleHehojExiste)
+	   http.HandleFunc("/", handleHealth)
+	   log.Println("\x1b[32m[INFO]\x1b[0m API listening on :8080 …") // Green color for info
+	   log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func createTable() {
@@ -119,8 +128,9 @@ func workerLoop() {
 }
 
 func fetchSwarmPeers() []string {
-	log.Println("\x1b[34m[INFO]\x1b[0m Fetching swarm peers from IPFS API.") // Blue color for info
-	resp, err := http.Post("http://127.0.0.1:5001/api/v0/swarm/peers", "application/x-www-form-urlencoded", nil)
+	   log.Println("\x1b[34m[INFO]\x1b[0m Fetching swarm peers from IPFS API.") // Blue color for info
+	   url := ipfsAPI + "/api/v0/swarm/peers"
+	   resp, err := http.Post(url, "application/x-www-form-urlencoded", nil)
 
 	if err != nil {
 		log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to get swarm peers: %v\n", err) // Red color for error
@@ -150,10 +160,10 @@ func pingPeer(peerID string) bool {
 func pingPeerWithAddress(peerID, addressMap string) bool {
 	log.Printf("\x1b[35m[PING]\x1b[0m Attempting to ping: %s (Address: %s)\n", peerID, addressMap) // Magenta color for ping
 
-	url := "http://127.0.0.1:5001/api/v0/ping?arg=" + peerID + "&count=1"
-	if addressMap != "" {
-		url = fmt.Sprintf("http://127.0.0.1:5001/api/v0/ping?arg=%s/p2p/%s&count=1", addressMap, peerID)
-	}
+	   url := ipfsAPI + "/api/v0/ping?arg=" + peerID + "&count=1"
+	   if addressMap != "" {
+			   url = fmt.Sprintf("%s/api/v0/ping?arg=%s/p2p/%s&count=1", ipfsAPI, addressMap, peerID)
+	   }
 
 	resp, err := http.Post(url, "application/x-www-form-urlencoded", nil)
 
@@ -263,6 +273,6 @@ func handleHehojExiste(w http.ResponseWriter, r *http.Request) {
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK - version 1.0.1"))
+	w.Write([]byte("OK - version 1.0.2"))
 	log.Println("\x1b[32m[API]\x1b[0m / endpoint served.") // Green color for API
 }
