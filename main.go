@@ -80,14 +80,15 @@ func createTable() {
 
 func workerLoop() {
 	for {
-		log.Println("\x1b[33m[WORKER]\x1b[0m Checking swarm peers …") // Yellow color for worker
-		peers := fetchSwarmPeers()
-		now := time.Now()
+		log.Println("\x1b[33m[WORKER]\x1b[0m Skipping public DHT …") // Yellow color for worker
+		// log.Println("\x1b[33m[WORKER]\x1b[0m Checking swarm peers …") // Yellow color for worker
+		// peers := fetchSwarmPeers()
+		// now := time.Now()
 
-		// Upsert newly fetched peers
-		for _, peerID := range peers {
-			upsertPeer(peerID, now, true)
-		}
+		// // Upsert newly fetched peers
+		// for _, peerID := range peers {
+		// 	upsertPeer(peerID, now, true)
+		// }
 
 		// Ping all known peers and update their status
 		dbMu.Lock() // Acquire lock before querying
@@ -123,7 +124,7 @@ func workerLoop() {
 			time.Sleep(500 * time.Millisecond) // Add 500-millisecond delay between pings
 		}
 
-		time.Sleep(10 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 }
 
@@ -273,6 +274,6 @@ func handleHehojExiste(w http.ResponseWriter, r *http.Request) {
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK - version 1.0.2"))
+	w.Write([]byte("OK - version 1.1.0"))
 	log.Println("\x1b[32m[API]\x1b[0m / endpoint served.") // Green color for API
 }
