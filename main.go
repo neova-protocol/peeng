@@ -3,7 +3,10 @@ package main
 import (
 	   "database/sql"
 	   "encoding/json"
+	   "bufio"
 	   "fmt"
+	   "strings"
+	   "context"
 	   "log"
 	   "net/http"
 	   "os"
@@ -95,7 +98,7 @@ func workerLoop() {
 		rows, err := db.Query(`
 			SELECT peer_id FROM peers
 			ORDER BY last_time_check ASC
-			LIMIT 500
+			LIMIT 5
 		`)
 		if err != nil {
 			log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to query peers for ping: %v\n", err) // Red color for error
@@ -121,10 +124,7 @@ func workerLoop() {
 			ok := pingPeer(pid) // This calls pingPeerWithAddress
 			log.Printf("\x1b[33m[WORKER]\x1b[0m Pinged %s, result: %t\n", pid, ok) // Yellow color for worker
 			upsertPeer(pid, time.Now(), ok) // This will acquire its own lock
-			time.Sleep(500 * time.Millisecond) // Add 500-millisecond delay between pings
 		}
-
-		time.Sleep(2 * time.Second)
 	}
 }
 
@@ -158,28 +158,88 @@ func pingPeer(peerID string) bool {
 	return pingPeerWithAddress(peerID, "") // Use the specific pingPeerWithAddress for regular pings
 }
 
+
 func pingPeerWithAddress(peerID, addressMap string) bool {
-	log.Printf("\x1b[35m[PING]\x1b[0m Attempting to ping: %s (Address: %s)\n", peerID, addressMap) // Magenta color for ping
+	const count = 4
+	const timeout = 30 * time.Second
 
-	   url := ipfsAPI + "/api/v0/ping?arg=" + peerID + "&count=1"
-	   if addressMap != "" {
-			   url = fmt.Sprintf("%s/api/v0/ping?arg=%s/p2p/%s&count=1", ipfsAPI, addressMap, peerID)
-	   }
+	log.Printf("\x1b[35m[PING]\x1b[0m Attempting to ping: %s (Address: %s)", peerID, addressMap)
 
-	resp, err := http.Post(url, "application/x-www-form-urlencoded", nil)
+	// Construire l’URL
+	var arg string
+	if addressMap != "" {
+		arg = fmt.Sprintf("%s/p2p/%s", addressMap, peerID)
+	} else {
+		arg = peerID
+	}
+	url := fmt.Sprintf("%s/api/v0/ping?arg=%s&count=%d", ipfsAPI, arg, count)
 
+	// Créer un client HTTP avec timeout
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
-		log.Printf("\x1b[31m[ERROR]\x1b[0m Ping %s failed: %v\n", peerID, err) // Red color for error
+		log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to create HTTP request: %v", err)
+		return false
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("\x1b[31m[ERROR]\x1b[0m HTTP request failed: %v", err)
 		return false
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("\x1b[31m[ERROR]\x1b[0m Ping %s returned status code %d\n", peerID, resp.StatusCode) // Red color for error
+		log.Printf("\x1b[31m[ERROR]\x1b[0m Ping returned HTTP status %d", resp.StatusCode)
 		return false
 	}
-	log.Printf("\x1b[32m[PING]\x1b[0m Successfully pinged %s.\n", peerID) // Green color for success
-	return true
+
+	// Scanner les lignes JSON
+	scanner := bufio.NewScanner(resp.Body)
+	var pongCount int
+	var totalLatency int64
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var msg struct {
+			Success bool   `json:"Success"`
+			Text    string `json:"Text"`
+			Time    int64  `json:"Time"` // ns
+		}
+		if err := json.Unmarshal(line, &msg); err != nil {
+			log.Printf("\x1b[33m[WARN]\x1b[0m Failed to parse line: %s", line)
+			continue
+		}
+
+		// Debug : log tout
+		log.Printf("\x1b[90m[DEBUG]\x1b[0m %+v", msg)
+
+		if msg.Time > 0 && msg.Success {
+			latencyMs := float64(msg.Time) / 1e6
+			log.Printf("\x1b[32m[PING]\x1b[0m %s pong in %.2f ms", peerID, latencyMs)
+			pongCount++
+			totalLatency += msg.Time
+			break
+		} else if !msg.Success && strings.Contains(strings.ToLower(msg.Text), "failed") {
+			log.Printf("\x1b[31m[ERROR]\x1b[0m Ping failed: %s", msg.Text)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("\x1b[31m[ERROR]\x1b[0m Error reading response: %v", err)
+		return false
+	}
+
+	if pongCount > 0 {
+		avgLatencyMs := float64(totalLatency) / float64(pongCount) / 1e6
+		log.Printf("\x1b[32m[PING]\x1b[0m %s average latency: %.2f ms (%d/%d pongs)", peerID, avgLatencyMs, pongCount, count)
+		return true
+	}
+
+	log.Printf("\x1b[31m[ERROR]\x1b[0m No pongs received from %s", peerID)
+	return false
 }
 
 func upsertPeer(peerID string, checkTime time.Time, active bool) {
@@ -203,7 +263,7 @@ func upsertPeer(peerID string, checkTime time.Time, active bool) {
 
 func handlePeers(w http.ResponseWriter, r *http.Request) {
 	dbMu.Lock()
-	rows, err := db.Query("SELECT peer_id, last_time_check, active FROM peers")
+	rows, err := db.Query("SELECT peer_id, last_time_check, active FROM peers ORDER BY last_time_check DESC")
 	dbMu.Unlock()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("\x1b[31m[ERROR]\x1b[0m Failed to query peers from DB: %v\n", err), http.StatusInternalServerError)
@@ -274,6 +334,6 @@ func handleHehojExiste(w http.ResponseWriter, r *http.Request) {
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK - version 1.1.0"))
+	w.Write([]byte("OK - version 1.1.3"))
 	log.Println("\x1b[32m[API]\x1b[0m / endpoint served.") // Green color for API
 }
