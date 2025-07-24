@@ -1,19 +1,19 @@
 package main
 
 import (
-	   "database/sql"
-	   "encoding/json"
-	   "bufio"
-	   "fmt"
-	   "strings"
-	   "context"
-	   "log"
-	   "net/http"
-	   "os"
-	   "sync"
-	   "time"
+	"bufio"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
 
-	   _ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // Peer représente une entrée dans la DB
@@ -32,10 +32,9 @@ type SwarmPeersResponse struct {
 
 // HehojExisteRequest représente le corps de la requête pour /hehojexiste
 type HehojExisteRequest struct {
-	PeerID    string `json:"peer_id"`
+	PeerID     string `json:"peer_id"`
 	AddressMap string `json:"address_map"`
 }
-
 
 var db *sql.DB
 var dbMu sync.Mutex // Mutex for database operations to prevent "database is locked" errors
@@ -43,27 +42,27 @@ var dbMu sync.Mutex // Mutex for database operations to prevent "database is loc
 var ipfsAPI string
 
 func main() {
-	   var err error
-	   db, err = sql.Open("sqlite3", "./peers.db")
-	   if err != nil {
-			   log.Fatalf("\x1b[31m[ERROR]\x1b[0m Failed to open database: %v\n", err) // Red color for error
-	   }
-	   defer db.Close()
+	var err error
+	db, err = sql.Open("sqlite3", "./peers.db")
+	if err != nil {
+		log.Fatalf("\x1b[31m[ERROR]\x1b[0m Failed to open database: %v\n", err) // Red color for error
+	}
+	defer db.Close()
 
-	   ipfsAPI = os.Getenv("IPFS_API")
-	   if ipfsAPI == "" {
-			   ipfsAPI = "http://127.0.0.1:5001" // Default fallback
-	   }
+	ipfsAPI = os.Getenv("IPFS_API")
+	if ipfsAPI == "" {
+		ipfsAPI = "http://127.0.0.1:5001" // Default fallback
+	}
 
-	   createTable()
+	createTable()
 
-	   go workerLoop()
+	go workerLoop()
 
-	   http.HandleFunc("/peers", handlePeers)
-	   http.HandleFunc("/hehojexiste", handleHehojExiste)
-	   http.HandleFunc("/", handleHealth)
-	   log.Println("\x1b[32m[INFO]\x1b[0m API listening on :8080 …") // Green color for info
-	   log.Fatal(http.ListenAndServe(":8080", nil))
+	http.HandleFunc("/peers", handlePeers)
+	http.HandleFunc("/hehojexiste", handleHehojExiste)
+	http.HandleFunc("/", handleHealth)
+	log.Println("\x1b[32m[INFO]\x1b[0m API listening on :8080 …") // Green color for info
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func createTable() {
@@ -93,6 +92,47 @@ func workerLoop() {
 		// 	upsertPeer(peerID, now, true)
 		// }
 
+		// loop 10 times to ping only inactive peers
+		log.Println("\x1b[33m[WORKER]\x1b[0m Inactive peers loop started") // Yellow color for worker
+		for i := 0; i < 10; i++ {
+
+			// Ping all known peers and update their status
+			dbMu.Lock() // Acquire lock before querying
+			rows, err := db.Query(`
+			SELECT peer_id FROM peers
+			WHERE active = 0
+			ORDER BY last_time_check ASC
+			LIMIT 10
+		`)
+			if err != nil {
+				log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to query peers for ping: %v\n", err) // Red color for error
+				dbMu.Unlock()                                                                  // Release lock on error
+				time.Sleep(30 * time.Second)                                                   // Still sleep to prevent tight loop
+				continue
+			}
+
+			var pidsToPing []string
+			for rows.Next() {
+				var pid string
+				if err := rows.Scan(&pid); err != nil {
+					log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to scan peer ID during worker loop: %v\n", err) // Red color for error
+					continue
+				}
+				pidsToPing = append(pidsToPing, pid)
+			}
+			rows.Close()  // Close the rows BEFORE releasing the lock, but after scanning
+			dbMu.Unlock() // Release lock after reading all peer IDs
+
+			// Ping peers outside the critical section to avoid holding the lock during HTTP calls
+			for _, pid := range pidsToPing {
+				ok := pingPeer(pid)                                                    // This calls pingPeerWithAddress
+				log.Printf("\x1b[33m[WORKER]\x1b[0m Pinged %s, result: %t\n", pid, ok) // Yellow color for worker
+				upsertPeer(pid, time.Now(), ok)                                        // This will acquire its own lock
+				time.Sleep(2 * time.Second)                                            // Sleep to avoid overwhelming the API
+			}
+		}
+		log.Println("\x1b[33m[WORKER]\x1b[0m Inactive peers loop finished") // Yellow color for worker
+
 		// Ping all known peers and update their status
 		dbMu.Lock() // Acquire lock before querying
 		rows, err := db.Query(`
@@ -102,8 +142,8 @@ func workerLoop() {
 		`)
 		if err != nil {
 			log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to query peers for ping: %v\n", err) // Red color for error
-			dbMu.Unlock() // Release lock on error
-			time.Sleep(30 * time.Second) // Still sleep to prevent tight loop
+			dbMu.Unlock()                                                                  // Release lock on error
+			time.Sleep(30 * time.Second)                                                   // Still sleep to prevent tight loop
 			continue
 		}
 
@@ -116,22 +156,26 @@ func workerLoop() {
 			}
 			pidsToPing = append(pidsToPing, pid)
 		}
-		rows.Close() // Close the rows BEFORE releasing the lock, but after scanning
+		rows.Close()  // Close the rows BEFORE releasing the lock, but after scanning
 		dbMu.Unlock() // Release lock after reading all peer IDs
 
 		// Ping peers outside the critical section to avoid holding the lock during HTTP calls
 		for _, pid := range pidsToPing {
-			ok := pingPeer(pid) // This calls pingPeerWithAddress
+			ok := pingPeer(pid)                                                    // This calls pingPeerWithAddress
 			log.Printf("\x1b[33m[WORKER]\x1b[0m Pinged %s, result: %t\n", pid, ok) // Yellow color for worker
-			upsertPeer(pid, time.Now(), ok) // This will acquire its own lock
+			upsertPeer(pid, time.Now(), ok)                                        // This will acquire its own lock
+			time.Sleep(5 * time.Second)                                            // Sleep to avoid overwhelming the API
 		}
+
+		// Wait before the next iteration
+		time.Sleep(30 * time.Second)
 	}
 }
 
 func fetchSwarmPeers() []string {
-	   log.Println("\x1b[34m[INFO]\x1b[0m Fetching swarm peers from IPFS API.") // Blue color for info
-	   url := ipfsAPI + "/api/v0/swarm/peers"
-	   resp, err := http.Post(url, "application/x-www-form-urlencoded", nil)
+	log.Println("\x1b[34m[INFO]\x1b[0m Fetching swarm peers from IPFS API.") // Blue color for info
+	url := ipfsAPI + "/api/v0/swarm/peers"
+	resp, err := http.Post(url, "application/x-www-form-urlencoded", nil)
 
 	if err != nil {
 		log.Printf("\x1b[31m[ERROR]\x1b[0m Failed to get swarm peers: %v\n", err) // Red color for error
@@ -157,7 +201,6 @@ func fetchSwarmPeers() []string {
 func pingPeer(peerID string) bool {
 	return pingPeerWithAddress(peerID, "") // Use the specific pingPeerWithAddress for regular pings
 }
-
 
 func pingPeerWithAddress(peerID, addressMap string) bool {
 	const count = 4
