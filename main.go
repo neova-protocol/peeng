@@ -17,8 +17,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const INACTIVE_QUERY = `SELECT peer_id FROM peers WHERE active = 0  and last_time_check < datetime('now', '-5 minutes') ORDER BY last_time_check ASC LIMIT 10`
-const OLD_QUERY = `SELECT peer_id FROM peers WHERE last_time_check < datetime('now', '-30 minutes') ORDER BY last_time_check ASC LIMIT 5`
+const INACTIVE_QUERY = `SELECT peer_id FROM peers WHERE active = 0  and last_time_check < datetime('now', '-30 minutes') ORDER BY last_time_check ASC LIMIT 10`
+const OLD_QUERY = `SELECT peer_id FROM peers WHERE last_time_check < datetime('now', '-90 minutes') ORDER BY last_time_check ASC LIMIT 5`
 
 // Peer represents a peer entry in the database
 type Peer struct {
@@ -76,10 +76,7 @@ func createTable() {
 
 func workerLoop() {
 	for {
-		log.Println("\x1b[3;33m[WORKER]\x1b[0m Skipping public DHT …")
-		log.Println("\x1b[3;33m[WORKER]\x1b[0m Inactive peers loop started")
 		pingPeersLoop(INACTIVE_QUERY, 1*time.Second)
-		log.Println("\x1b[3;33m[WORKER]\x1b[0m Inactive peers loop finished")
 		pingPeersLoop(OLD_QUERY, 1*time.Second)
 	}
 }
