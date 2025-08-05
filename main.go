@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/getsentry/sentry-go"
+	sentryhttp "github.com/getsentry/sentry-go/http"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -47,6 +49,22 @@ func main() {
 	}
 	defer db.Close()
 
+	// Sentry initialization
+	sentryDsn := os.Getenv("SENTRY_DSN")
+
+	err = sentry.Init(sentry.ClientOptions{
+		Dsn:              sentryDsn,
+		Debug:            true,
+		SendDefaultPII:   true,
+		EnableTracing:    true,
+		TracesSampleRate: 1.0,
+		EnableLogs:       true,
+	})
+	if err != nil {
+		logFatal("Sentry initialization failed", err)
+	}
+	defer sentry.Flush(2 * time.Second)
+
 	ipfsAPI = os.Getenv("IPFS_API")
 	if ipfsAPI == "" {
 		ipfsAPI = "http://127.0.0.1:5001"
@@ -55,9 +73,17 @@ func main() {
 	createTable()
 	go workerLoop()
 
-	http.HandleFunc("/peers", handlePeers)
-	http.HandleFunc("/hehojexiste", handleHehojExiste)
-	http.HandleFunc("/", handleHealth)
+	// Sentry HTTP middleware
+	sentryHandler := sentryhttp.New(sentryhttp.Options{
+		Repanic:         true,
+		WaitForDelivery: false,
+		Timeout:         5 * time.Second,
+	})
+
+	http.Handle("/peers", sentryHandler.Handle(http.HandlerFunc(handlePeers)))
+	http.Handle("/hehojexiste", sentryHandler.Handle(http.HandlerFunc(handleHehojExiste)))
+	http.Handle("/panic", sentryHandler.Handle(http.HandlerFunc(handlePanic)))
+	http.Handle("/", sentryHandler.Handle(http.HandlerFunc(handleHealth)))
 	log.Println("\x1b[1;32m[INFO]\x1b[0m API listening on :8080 …")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
@@ -296,4 +322,9 @@ func logFatal(msg string, err error) {
 	} else {
 		log.Fatalf("\x1b[1;31m[ERROR]\x1b[0m %s", msg)
 	}
+}
+
+// handlePanic triggers a panic for Sentry integration testing
+func handlePanic(w http.ResponseWriter, r *http.Request) {
+	panic("Sentry test panic: everything is broken!")
 }
