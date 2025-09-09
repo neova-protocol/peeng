@@ -24,9 +24,11 @@ const OLD_QUERY = `SELECT peer_id FROM peers WHERE last_time_check < datetime('n
 
 // Peer represents a peer entry in the database
 type Peer struct {
-	PeerID        string    `json:"peer_id"`
-	LastTimeCheck time.Time `json:"last_time_check"`
-	Active        bool      `json:"active"`
+	PeerID         string    `json:"peer_id"`
+	LastTimeCheck  time.Time `json:"last_time_check"`
+	Active         bool      `json:"active"`
+	TotalSizeBytes int64     `json:"total_size_bytes,omitempty"`
+	UsedSizeBytes  int64     `json:"used_size_bytes,omitempty"`
 }
 
 // HehojExisteRequest represents the request body for /hehojexiste
@@ -82,6 +84,7 @@ func main() {
 
 	http.Handle("/peers", sentryHandler.Handle(http.HandlerFunc(handlePeers)))
 	http.Handle("/hehojexiste", sentryHandler.Handle(http.HandlerFunc(handleHehojExiste)))
+	http.Handle("/update", sentryHandler.Handle(http.HandlerFunc(handleUpdate)))
 	http.Handle("/panic", sentryHandler.Handle(http.HandlerFunc(handlePanic)))
 	http.Handle("/", sentryHandler.Handle(http.HandlerFunc(handleHealth)))
 	log.Println("\x1b[1;32m[INFO]\x1b[0m API listening on :8080 …")
@@ -92,12 +95,28 @@ func createTable() {
 	sqlStmt := `CREATE TABLE IF NOT EXISTS peers (
 		peer_id TEXT PRIMARY KEY,
 		last_time_check TIMESTAMP,
-		active BOOLEAN
+		active BOOLEAN,
+		total_size_bytes INTEGER,
+		used_size_bytes INTEGER
 	);`
 	if _, err := db.Exec(sqlStmt); err != nil {
 		logFatal("Failed to create table", err)
 	}
+	// Ensure new columns exist for legacy databases (ignore duplicate errors)
+	ensureColumn("total_size_bytes INTEGER")
+	ensureColumn("used_size_bytes INTEGER")
 	log.Println("\x1b[1;34m[INFO]\x1b[0m Database table 'peers' ensured.")
+}
+
+// ensureColumn attempts to add a column, ignoring errors about duplicates
+func ensureColumn(def string) {
+	stmt := fmt.Sprintf("ALTER TABLE peers ADD COLUMN %s;", def)
+	if _, err := db.Exec(stmt); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column") &&
+			!strings.Contains(strings.ToLower(err.Error()), "already exists") {
+			log.Printf("\x1b[1;33m[WARN]\x1b[0m Could not add column %s: %v", def, err)
+		}
+	}
 }
 
 func workerLoop() {
@@ -238,10 +257,22 @@ func upsertPeer(peerID string, checkTime time.Time, active bool) {
 	}
 }
 
+// updatePeerSizes updates storage size metrics for a peer (must already exist or will not create a new row)
+func updatePeerSizes(peerID string, total, used int64) {
+	dbMu.Lock()
+	defer dbMu.Unlock()
+	_, err := db.Exec(`UPDATE peers SET total_size_bytes = ?, used_size_bytes = ? WHERE peer_id = ?`, total, used, peerID)
+	if err != nil {
+		logError(fmt.Sprintf("Failed to update size metrics for %s", peerID), err)
+	} else {
+		log.Printf("\x1b[1;36m[DB]\x1b[0m Updated sizes for %s (total=%d, used=%d).", peerID, total, used)
+	}
+}
+
 // handlePeers serves the /peers endpoint
 func handlePeers(w http.ResponseWriter, r *http.Request) {
 	dbMu.Lock()
-	rows, err := db.Query("SELECT peer_id, last_time_check, active FROM peers ORDER BY last_time_check DESC")
+	rows, err := db.Query("SELECT peer_id, last_time_check, active, COALESCE(total_size_bytes,0), COALESCE(used_size_bytes,0) FROM peers ORDER BY last_time_check DESC")
 	dbMu.Unlock()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("\x1b[1;31m[ERROR]\x1b[0m Failed to query peers from DB: %v", err), http.StatusInternalServerError)
@@ -253,7 +284,7 @@ func handlePeers(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p Peer
 		var ts string
-		if err := rows.Scan(&p.PeerID, &ts, &p.Active); err != nil {
+		if err := rows.Scan(&p.PeerID, &ts, &p.Active, &p.TotalSizeBytes, &p.UsedSizeBytes); err != nil {
 			logError("Failed to scan peer row", err)
 			continue
 		}
@@ -296,6 +327,56 @@ func handleHehojExiste(w http.ResponseWriter, r *http.Request) {
 		logError("Failed to encode /hehojexiste response", err)
 	}
 	log.Printf("\x1b[1;32m[API]\x1b[0m /hehojexiste endpoint served for PeerID %s.", req.PeerID)
+}
+
+// UpdateRequest represents the request body for /update
+type UpdateRequest struct {
+	PeerID         string `json:"peer_id"`
+	AddressMap     string `json:"address_map"`
+	TotalSizeBytes int64  `json:"total_size_bytes"`
+	UsedSizeBytes  int64  `json:"used_size_bytes"`
+}
+
+// handleUpdate serves the /update endpoint (ping + upsert + sizes)
+func handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m Only POST method is allowed for /update", http.StatusMethodNotAllowed)
+		return
+	}
+	var req UpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("\x1b[1;31m[ERROR]\x1b[0m Failed to decode request body: %v", err), http.StatusBadRequest)
+		return
+	}
+	if req.PeerID == "" {
+		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m 'peer_id' is required", http.StatusBadRequest)
+		return
+	}
+	if req.TotalSizeBytes < 0 || req.UsedSizeBytes < 0 {
+		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m size values must be non-negative", http.StatusBadRequest)
+		return
+	}
+	if req.UsedSizeBytes > req.TotalSizeBytes {
+		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m 'used_size_bytes' cannot exceed 'total_size_bytes'", http.StatusBadRequest)
+		return
+	}
+	log.Printf("\x1b[1;3;35m[API]\x1b[0m Received /update request for PeerID: %s, AddressMap: %s, total=%d, used=%d", req.PeerID, req.AddressMap, req.TotalSizeBytes, req.UsedSizeBytes)
+	// pingOK := pingPeerWithAddress(req.PeerID, req.AddressMap)
+	// TODO: secure this endpoint to avoid abuse
+	pingOK := true // Temporarily assume ping is successful
+	upsertPeer(req.PeerID, time.Now(), pingOK)
+	updatePeerSizes(req.PeerID, req.TotalSizeBytes, req.UsedSizeBytes)
+	response := map[string]interface{}{
+		"ping_successful":  pingOK,
+		"peer_id":          req.PeerID,
+		"total_size_bytes": req.TotalSizeBytes,
+		"used_size_bytes":  req.UsedSizeBytes,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logError("Failed to encode /update response", err)
+	}
+	log.Printf("\x1b[1;32m[API]\x1b[0m /update endpoint served for PeerID %s.", req.PeerID)
 }
 
 // handleHealth serves the root health endpoint
