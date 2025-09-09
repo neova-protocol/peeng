@@ -31,8 +31,8 @@ type Peer struct {
 	UsedSizeBytes  int64     `json:"used_size_bytes,omitempty"`
 }
 
-// HehojExisteRequest represents the request body for /hehojexiste
-type HehojExisteRequest struct {
+// PingPeerRequest represents the request body for /ping-peer
+type PingPeerRequest struct {
 	PeerID     string `json:"peer_id"`
 	AddressMap string `json:"address_map"`
 }
@@ -83,7 +83,7 @@ func main() {
 	})
 
 	http.Handle("/peers", sentryHandler.Handle(http.HandlerFunc(handlePeers)))
-	http.Handle("/hehojexiste", sentryHandler.Handle(http.HandlerFunc(handleHehojExiste)))
+	http.Handle("/ping-peer", sentryHandler.Handle(http.HandlerFunc(handlePingPeer)))
 	http.Handle("/update", sentryHandler.Handle(http.HandlerFunc(handleUpdate)))
 	http.Handle("/panic", sentryHandler.Handle(http.HandlerFunc(handlePanic)))
 	http.Handle("/", sentryHandler.Handle(http.HandlerFunc(handleHealth)))
@@ -303,13 +303,13 @@ func handlePeers(w http.ResponseWriter, r *http.Request) {
 	log.Println("\x1b[1;32m[API]\x1b[0m /peers endpoint served.")
 }
 
-// handleHehojExiste serves the /hehojexiste endpoint
-func handleHehojExiste(w http.ResponseWriter, r *http.Request) {
+// handlePingPeer serves the /ping-peer endpoint
+func handlePingPeer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m Only POST method is allowed for /hehojexiste", http.StatusMethodNotAllowed)
+		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m Only POST method is allowed for /ping-peer", http.StatusMethodNotAllowed)
 		return
 	}
-	var req HehojExisteRequest
+	var req PingPeerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("\x1b[1;31m[ERROR]\x1b[0m Failed to decode request body: %v", err), http.StatusBadRequest)
 		return
@@ -318,15 +318,15 @@ func handleHehojExiste(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m 'peer_id' is required", http.StatusBadRequest)
 		return
 	}
-	log.Printf("\x1b[1;3;35m[API]\x1b[0m Received /hehojexiste request for PeerID: %s, AddressMap: %s", req.PeerID, req.AddressMap)
+	log.Printf("\x1b[1;3;35m[API]\x1b[0m Received /ping-peer request for PeerID: %s, AddressMap: %s", req.PeerID, req.AddressMap)
 	pingOK := pingPeerWithAddress(req.PeerID, req.AddressMap)
 	upsertPeer(req.PeerID, time.Now(), pingOK)
 	response := map[string]bool{"ping_successful": pingOK}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logError("Failed to encode /hehojexiste response", err)
+		logError("Failed to encode /ping-peer response", err)
 	}
-	log.Printf("\x1b[1;32m[API]\x1b[0m /hehojexiste endpoint served for PeerID %s.", req.PeerID)
+	log.Printf("\x1b[1;32m[API]\x1b[0m /ping-peer endpoint served for PeerID %s.", req.PeerID)
 }
 
 // UpdateRequest represents the request body for /update
