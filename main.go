@@ -49,7 +49,11 @@ func main() {
 	if err != nil {
 		logFatal("Failed to open database", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("\x1b[1;33m[WARN]\x1b[0m Failed to close database: %v", err)
+		}
+	}()
 
 	// Sentry initialization
 	sentryDsn := os.Getenv("SENTRY_DSN")
@@ -145,7 +149,11 @@ func getPeerIDs(query string) []string {
 		logError("Failed to query peers for ping", err)
 		return nil
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			logError("Failed to close rows", err)
+		}
+	}()
 	var pids []string
 	for rows.Next() {
 		log.Printf("Debug: Scanning peer ID")
@@ -191,7 +199,11 @@ func pingPeerWithAddress(peerID, addressMap string) bool {
 		logError("HTTP request failed", err)
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logError("Failed to close response body", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		logError(fmt.Sprintf("Ping returned HTTP status %d", resp.StatusCode), nil)
@@ -278,7 +290,11 @@ func handlePeers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("\x1b[1;31m[ERROR]\x1b[0m Failed to query peers from DB: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			logError("Failed to close rows", err)
+		}
+	}()
 
 	var peers []Peer
 	for rows.Next() {
@@ -382,7 +398,9 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 // handleHealth serves the root health endpoint
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK - version 1.2.0"))
+	if _, err := w.Write([]byte("OK - version 1.2.0")); err != nil {
+		logError("Failed to write health response", err)
+	}
 	log.Println("\x1b[1;32m[API]\x1b[0m / endpoint served.")
 }
 
