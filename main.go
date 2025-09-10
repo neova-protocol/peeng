@@ -398,7 +398,7 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 // handleHealth serves the root health endpoint
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("OK - version 1.2.0")); err != nil {
+	if _, err := w.Write([]byte("OK - version 1.3.1")); err != nil {
 		logError("Failed to write health response", err)
 	}
 	log.Println("\x1b[1;32m[API]\x1b[0m / endpoint served.")
