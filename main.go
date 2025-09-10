@@ -83,8 +83,8 @@ func main() {
 	})
 
 	http.Handle("/peers", sentryHandler.Handle(http.HandlerFunc(handlePeers)))
-	http.Handle("/ping-peer", sentryHandler.Handle(http.HandlerFunc(handlePingPeer)))
-	http.Handle("/update", sentryHandler.Handle(http.HandlerFunc(handleUpdate)))
+	http.Handle("/peer/ping", sentryHandler.Handle(http.HandlerFunc(handlePingPeer)))
+	http.Handle("/peer/update", sentryHandler.Handle(http.HandlerFunc(handleUpdate)))
 	http.Handle("/panic", sentryHandler.Handle(http.HandlerFunc(handlePanic)))
 	http.Handle("/", sentryHandler.Handle(http.HandlerFunc(handleHealth)))
 	log.Println("\x1b[1;32m[INFO]\x1b[0m API listening on :8080 …")
@@ -303,10 +303,10 @@ func handlePeers(w http.ResponseWriter, r *http.Request) {
 	log.Println("\x1b[1;32m[API]\x1b[0m /peers endpoint served.")
 }
 
-// handlePingPeer serves the /ping-peer endpoint
+// handlePingPeer serves the /peer/ping endpoint
 func handlePingPeer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m Only POST method is allowed for /ping-peer", http.StatusMethodNotAllowed)
+		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m Only POST method is allowed for /peer/ping", http.StatusMethodNotAllowed)
 		return
 	}
 	var req PingPeerRequest
@@ -318,15 +318,15 @@ func handlePingPeer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m 'peer_id' is required", http.StatusBadRequest)
 		return
 	}
-	log.Printf("\x1b[1;3;35m[API]\x1b[0m Received /ping-peer request for PeerID: %s, AddressMap: %s", req.PeerID, req.AddressMap)
+	log.Printf("\x1b[1;3;35m[API]\x1b[0m Received /peer/ping request for PeerID: %s, AddressMap: %s", req.PeerID, req.AddressMap)
 	pingOK := pingPeerWithAddress(req.PeerID, req.AddressMap)
 	upsertPeer(req.PeerID, time.Now(), pingOK)
 	response := map[string]bool{"ping_successful": pingOK}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logError("Failed to encode /ping-peer response", err)
+		logError("Failed to encode /peer/ping response", err)
 	}
-	log.Printf("\x1b[1;32m[API]\x1b[0m /ping-peer endpoint served for PeerID %s.", req.PeerID)
+	log.Printf("\x1b[1;32m[API]\x1b[0m /peer/ping endpoint served for PeerID %s.", req.PeerID)
 }
 
 // UpdateRequest represents the request body for /update
@@ -337,10 +337,10 @@ type UpdateRequest struct {
 	UsedSizeBytes  int64  `json:"used_size_bytes"`
 }
 
-// handleUpdate serves the /update endpoint (ping + upsert + sizes)
+// handleUpdate serves the /peer/update endpoint (ping + upsert + sizes)
 func handleUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m Only POST method is allowed for /update", http.StatusMethodNotAllowed)
+		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m Only POST method is allowed for /peer/update", http.StatusMethodNotAllowed)
 		return
 	}
 	var req UpdateRequest
@@ -360,7 +360,7 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "\x1b[1;31m[ERROR]\x1b[0m 'used_size_bytes' cannot exceed 'total_size_bytes'", http.StatusBadRequest)
 		return
 	}
-	log.Printf("\x1b[1;3;35m[API]\x1b[0m Received /update request for PeerID: %s, AddressMap: %s, total=%d, used=%d", req.PeerID, req.AddressMap, req.TotalSizeBytes, req.UsedSizeBytes)
+	log.Printf("\x1b[1;3;35m[API]\x1b[0m Received /peer/update request for PeerID: %s, AddressMap: %s, total=%d, used=%d", req.PeerID, req.AddressMap, req.TotalSizeBytes, req.UsedSizeBytes)
 	// pingOK := pingPeerWithAddress(req.PeerID, req.AddressMap)
 	// TODO: secure this endpoint to avoid abuse
 	pingOK := true // Temporarily assume ping is successful
@@ -374,9 +374,9 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logError("Failed to encode /update response", err)
+		logError("Failed to encode /peer/update response", err)
 	}
-	log.Printf("\x1b[1;32m[API]\x1b[0m /update endpoint served for PeerID %s.", req.PeerID)
+	log.Printf("\x1b[1;32m[API]\x1b[0m /peer/update endpoint served for PeerID %s.", req.PeerID)
 }
 
 // handleHealth serves the root health endpoint
